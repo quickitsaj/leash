@@ -65,6 +65,7 @@ contract LeashLedger {
     // ─── Errors ─────────────────────────────────────────────────────────
 
     error LeashNotAlive();
+    error OnlyAgent();
     error ChainIntegrityBroken(uint256 entryIndex);
 
     // ─── Constructor ────────────────────────────────────────────────────
@@ -76,12 +77,14 @@ contract LeashLedger {
     // ─── Logging ────────────────────────────────────────────────────────
 
     /// @notice Append a new action to the audit trail for a leash.
+    /// @dev Only callable by the leash's agent address.
     /// @param leashId The leash this action belongs to
     /// @param actionType The type of action performed
     /// @param target The target address of the action
     /// @param value The value/amount of the action
     function log(bytes32 leashId, ActionType actionType, address target, uint128 value) external {
         LeashCore.Leash memory l = core.getLeash(leashId);
+        if (msg.sender != l.agent) revert OnlyAgent();
         if (!l.alive) revert LeashNotAlive();
 
         uint128 auth = core.effectiveAuthority(leashId);
@@ -163,11 +166,11 @@ contract LeashLedger {
     function summary(bytes32 leashId) external view returns (Summary memory s) {
         LogEntry[] storage entries = _logs[leashId];
         uint256 len = entries.length;
-        if (len == 0) return s;
+        if (len == 0) return s; // All fields default to 0
 
         s.totalActions = len;
         s.highestAuthority = 0;
-        s.lowestAuthority = type(uint128).max;
+        s.lowestAuthority = entries[0].authorityAtTime;
         s.firstAction = entries[0].timestamp;
         s.lastAction = entries[len - 1].timestamp;
 

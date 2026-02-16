@@ -251,7 +251,8 @@ contract LeashPolicyTest is Test {
         vm.prank(principal);
         policy.bindPolicy(leashId, policyId);
 
-        // Spend 10,000 USDC
+        // Spend 10,000 USDC (must be called by agent)
+        vm.prank(agent);
         policy.recordSpend(leashId, 10_000e6);
 
         // Check remaining budget (Tier 3: 50,000 cap - 10,000 spent = 40,000)
@@ -267,9 +268,11 @@ contract LeashPolicyTest is Test {
         policy.bindPolicy(leashId, policyId);
 
         // Spend full budget
+        vm.prank(agent);
         policy.recordSpend(leashId, 50_000e6);
 
         // Next spend should fail
+        vm.prank(agent);
         vm.expectRevert(LeashPolicy.BudgetExceeded.selector);
         policy.recordSpend(leashId, 1);
     }
@@ -280,6 +283,7 @@ contract LeashPolicyTest is Test {
         policy.bindPolicy(leashId, policyId);
 
         // Spend full tier 3 budget
+        vm.prank(agent);
         policy.recordSpend(leashId, 50_000e6);
 
         // Warp past epoch (1 day)
@@ -290,13 +294,31 @@ contract LeashPolicyTest is Test {
         core.boost(leashId, 50e18);
 
         // Should be able to spend again (new epoch)
+        vm.prank(agent);
         policy.recordSpend(leashId, 10_000e6);
         (, uint128 remaining,) = policy.agentStatus(leashId);
         assertEq(remaining, 40_000e6);
     }
 
     function test_recordSpend_revertsIfUnbound() public {
+        vm.prank(agent);
         vm.expectRevert(LeashPolicy.LeashNotBound.selector);
+        policy.recordSpend(leashId, 100e6);
+    }
+
+    function test_recordSpend_revertsIfNotAgent() public {
+        bytes32 policyId = _createStandardPolicy();
+        vm.prank(principal);
+        policy.bindPolicy(leashId, policyId);
+
+        // Non-agent caller should be rejected
+        vm.prank(principal);
+        vm.expectRevert(LeashPolicy.OnlyAgent.selector);
+        policy.recordSpend(leashId, 100e6);
+
+        // Random address should also be rejected
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(LeashPolicy.OnlyAgent.selector);
         policy.recordSpend(leashId, 100e6);
     }
 

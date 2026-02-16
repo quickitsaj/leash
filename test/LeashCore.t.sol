@@ -75,6 +75,12 @@ contract LeashCoreTest is Test {
         core.create(principal, INITIAL_AUTHORITY, CEILING, DECAY_PER_SECOND);
     }
 
+    function test_create_revertsIfAgentIsZero() public {
+        vm.prank(principal);
+        vm.expectRevert(LeashCore.AgentCannotBeZero.selector);
+        core.create(address(0), INITIAL_AUTHORITY, CEILING, DECAY_PER_SECOND);
+    }
+
     function test_create_revertsIfAuthorityExceedsCeiling() public {
         vm.prank(principal);
         vm.expectRevert(LeashCore.InitialAuthorityExceedsCeiling.selector);

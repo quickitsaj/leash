@@ -30,6 +30,7 @@ contract LeashLedgerTest is Test {
     // ─── log() ──────────────────────────────────────────────────────────
 
     function test_log_appendsEntry() public {
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
 
         assertEq(ledger.entryCount(leashId), 1);
@@ -45,14 +46,17 @@ contract LeashLedgerTest is Test {
     }
 
     function test_log_multipleEntries() public {
+        vm.startPrank(agent);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
         ledger.log(leashId, LeashLedger.ActionType.SWAP, address(0x2222), 500e6);
         ledger.log(leashId, LeashLedger.ActionType.PROVIDE_LP, address(0x3333), 1000e6);
+        vm.stopPrank();
 
         assertEq(ledger.entryCount(leashId), 3);
     }
 
     function test_log_chainsHashesCorrectly() public {
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
 
         // Get the chain head after first entry
@@ -60,6 +64,7 @@ contract LeashLedgerTest is Test {
         assertTrue(head1 != bytes32(0));
 
         // Second entry should reference first entry's hash
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.SWAP, address(0x2222), 200e6);
 
         LeashLedger.LogEntry memory entry2 = ledger.getEntry(leashId, 1);
@@ -68,12 +73,14 @@ contract LeashLedgerTest is Test {
 
     function test_log_capturesDecayedAuthority() public {
         // Log at full authority
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
 
         // Warp time to let authority decay
         vm.warp(block.timestamp + 10 hours);
 
         // Log again — should capture decayed authority
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.SWAP, address(0x2222), 200e6);
 
         LeashLedger.LogEntry memory entry1 = ledger.getEntry(leashId, 0);
@@ -86,11 +93,25 @@ contract LeashLedgerTest is Test {
         vm.prank(principal);
         core.kill(leashId);
 
+        vm.prank(agent);
         vm.expectRevert(LeashLedger.LeashNotAlive.selector);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
     }
 
+    function test_log_revertsIfNotAgent() public {
+        // Principal cannot log
+        vm.prank(principal);
+        vm.expectRevert(LeashLedger.OnlyAgent.selector);
+        ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
+
+        // Random address cannot log
+        vm.prank(address(0xDEAD));
+        vm.expectRevert(LeashLedger.OnlyAgent.selector);
+        ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
+    }
+
     function test_log_emitsEvent() public {
+        vm.prank(agent);
         vm.expectEmit(true, true, false, true);
         emit LeashLedger.ActionLogged(
             leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6, INITIAL_AUTHORITY, 0
@@ -107,6 +128,7 @@ contract LeashLedgerTest is Test {
     }
 
     function test_verifyChain_singleEntryValid() public {
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
 
         bool valid = ledger.verifyChain(leashId);
@@ -114,10 +136,12 @@ contract LeashLedgerTest is Test {
     }
 
     function test_verifyChain_multipleEntriesValid() public {
+        vm.startPrank(agent);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
         ledger.log(leashId, LeashLedger.ActionType.SWAP, address(0x2222), 200e6);
         ledger.log(leashId, LeashLedger.ActionType.BORROW, address(0x3333), 300e6);
         ledger.log(leashId, LeashLedger.ActionType.GOVERNANCE, address(0x4444), 0);
+        vm.stopPrank();
 
         bool valid = ledger.verifyChain(leashId);
         assertTrue(valid);
@@ -134,12 +158,15 @@ contract LeashLedgerTest is Test {
     }
 
     function test_summary_aggregatesCorrectly() public {
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
 
         vm.warp(block.timestamp + 5 hours);
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.SWAP, address(0x2222), 500e6);
 
         vm.warp(block.timestamp + 5 hours);
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.BORROW, address(0x3333), 1000e6);
 
         LeashLedger.Summary memory s = ledger.summary(leashId);
@@ -151,10 +178,12 @@ contract LeashLedgerTest is Test {
 
     function test_summary_tracksTimeRange() public {
         uint64 t1 = uint64(block.timestamp);
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
 
         vm.warp(block.timestamp + 1 days);
         uint64 t2 = uint64(block.timestamp);
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.SWAP, address(0x2222), 200e6);
 
         LeashLedger.Summary memory s = ledger.summary(leashId);
@@ -165,6 +194,7 @@ contract LeashLedgerTest is Test {
     // ─── All action types ───────────────────────────────────────────────
 
     function test_allActionTypes() public {
+        vm.startPrank(agent);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1), 1);
         ledger.log(leashId, LeashLedger.ActionType.SWAP, address(0x2), 2);
         ledger.log(leashId, LeashLedger.ActionType.PROVIDE_LP, address(0x3), 3);
@@ -173,6 +203,7 @@ contract LeashLedgerTest is Test {
         ledger.log(leashId, LeashLedger.ActionType.DELEGATE, address(0x6), 6);
         ledger.log(leashId, LeashLedger.ActionType.GOVERNANCE, address(0x7), 7);
         ledger.log(leashId, LeashLedger.ActionType.CUSTOM, address(0x8), 8);
+        vm.stopPrank();
 
         assertEq(ledger.entryCount(leashId), 8);
 
@@ -183,6 +214,7 @@ contract LeashLedgerTest is Test {
     // ─── Walkaway properties ────────────────────────────────────────────
 
     function test_walkaway_appendOnlyNoDeletion() public {
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
         uint256 count = ledger.entryCount(leashId);
         assertEq(count, 1);
@@ -195,8 +227,10 @@ contract LeashLedgerTest is Test {
     }
 
     function test_walkaway_summaryWorksWithoutDependencies() public {
+        vm.startPrank(agent);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
         ledger.log(leashId, LeashLedger.ActionType.SWAP, address(0x2222), 200e6);
+        vm.stopPrank();
 
         // Kill the leash
         vm.prank(principal);

@@ -73,16 +73,18 @@ contract IntegrationTest is Test {
         policy.bindPolicy(leashId, policyId);
 
         // 3. AGENT OPERATES: Agent checks status and executes
-        (uint8 tier, uint128 remaining, bool canDeploy) = policy.agentStatus(leashId);
+        (uint8 tier,,) = policy.agentStatus(leashId);
         assertEq(tier, 1); // 30e18 >= 20e18, < 60e18 → Tier 1
 
         // Agent swaps on Uniswap (whitelisted for tier 1)
         (bool allowed,) = policy.checkAction(leashId, UNISWAP, 50e6);
         assertTrue(allowed);
 
-        // Record spend and log
+        // Record spend and log (must be called by agent)
+        vm.startPrank(agent);
         policy.recordSpend(leashId, 50e6);
         ledger.log(leashId, LeashLedger.ActionType.SWAP, UNISWAP, 50e6);
+        vm.stopPrank();
 
         // 4. PRINCIPAL MAINTAINS: Weekly heartbeats
         vm.warp(block.timestamp + 7 days);
@@ -220,7 +222,8 @@ contract IntegrationTest is Test {
         vm.prank(principal);
         policy.bindPolicy(leashId, policyId);
 
-        // Log some actions
+        // Log some actions (as agent)
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1111), 100e6);
 
         // Both disappear. Nobody heartbeats.
@@ -280,20 +283,24 @@ contract IntegrationTest is Test {
         vm.prank(principal);
         bytes32 leashId = core.create(agent, 100e18, 200e18, 277_777_777_777_778);
 
-        // Multiple actions over time
+        // Multiple actions over time (all logged by agent)
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1), 100e6);
 
         vm.warp(block.timestamp + 1 hours);
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.SWAP, address(0x2), 200e6);
 
         vm.warp(block.timestamp + 2 hours);
         vm.prank(principal);
         core.heartbeat(leashId);
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.PROVIDE_LP, address(0x3), 500e6);
 
         vm.warp(block.timestamp + 1 hours);
         vm.prank(principal);
         core.boost(leashId, 30e18);
+        vm.prank(agent);
         ledger.log(leashId, LeashLedger.ActionType.BORROW, address(0x4), 1000e6);
 
         // Verify chain integrity
@@ -305,5 +312,45 @@ contract IntegrationTest is Test {
         assertEq(s.totalActions, 4);
         assertEq(s.totalValue, 1800e6);
         assertTrue(s.highestAuthority > s.lowestAuthority); // Authority varied
+    }
+
+    // ─── Access Control ─────────────────────────────────────────────────
+
+    function test_recordSpend_onlyAgent() public {
+        vm.prank(principal);
+        bytes32 leashId = core.create(agent, 100e18, 200e18, 277_777_777_777_778);
+
+        bytes32 policyId = _create4TierPolicy();
+        vm.prank(principal);
+        policy.bindPolicy(leashId, policyId);
+
+        // Non-agent cannot recordSpend
+        vm.prank(principal);
+        vm.expectRevert(LeashPolicy.OnlyAgent.selector);
+        policy.recordSpend(leashId, 100e6);
+
+        // Agent can recordSpend
+        vm.prank(agent);
+        policy.recordSpend(leashId, 100e6);
+    }
+
+    function test_log_onlyAgent() public {
+        vm.prank(principal);
+        bytes32 leashId = core.create(agent, 100e18, 200e18, 277_777_777_777_778);
+
+        // Non-agent cannot log
+        vm.prank(principal);
+        vm.expectRevert(LeashLedger.OnlyAgent.selector);
+        ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1), 100e6);
+
+        // Agent can log
+        vm.prank(agent);
+        ledger.log(leashId, LeashLedger.ActionType.TRANSFER, address(0x1), 100e6);
+    }
+
+    function test_create_revertsOnZeroAgent() public {
+        vm.prank(principal);
+        vm.expectRevert(LeashCore.AgentCannotBeZero.selector);
+        core.create(address(0), 100e18, 200e18, 277_777_777_777_778);
     }
 }

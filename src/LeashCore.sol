@@ -59,6 +59,7 @@ contract LeashCore {
     // ─── Errors ─────────────────────────────────────────────────────────
 
     error AgentCannotBePrincipal();
+    error AgentCannotBeZero();
     error InitialAuthorityExceedsCeiling();
     error DecayMustBeNonZero();
     error OnlyPrincipal();
@@ -93,6 +94,7 @@ contract LeashCore {
         uint128 ceiling,
         uint128 decayPerSecond
     ) external returns (bytes32 leashId) {
+        if (agent == address(0)) revert AgentCannotBeZero();
         if (agent == msg.sender) revert AgentCannotBePrincipal();
         if (initialAuthority > ceiling) revert InitialAuthorityExceedsCeiling();
         if (decayPerSecond == 0) revert DecayMustBeNonZero();
@@ -151,6 +153,10 @@ contract LeashCore {
     }
 
     /// @notice Permissionless authority reduction. Rate-limited per slasher per leash.
+    /// @dev Materializes accrued decay first, then subtracts slash amount.
+    ///      lastHeartbeat is reset to avoid double-counting decay on the
+    ///      already-materialized value. This does NOT extend the leash's
+    ///      lifetime because all accrued decay was already applied.
     /// @param leashId The leash to slash
     /// @param amount Amount to reduce authority by
     function slash(bytes32 leashId, uint128 amount) external onlyAlive(leashId) {
@@ -162,14 +168,14 @@ contract LeashCore {
 
         Leash storage l = _leashes[leashId];
 
-        // Materialize decay
+        // Materialize decay — all accrued decay is applied to stored authority
         uint128 eff = _effectiveAuthority(l);
 
         // Reduce authority, floor at zero
         uint128 newAuth = amount >= eff ? 0 : eff - amount;
 
         l.authority = newAuth;
-        l.lastHeartbeat = uint64(block.timestamp);
+        l.lastHeartbeat = uint64(block.timestamp); // Reset to avoid double-counting materialized decay
         lastSlashTime[msg.sender][leashId] = block.timestamp;
 
         emit Slashed(leashId, msg.sender, amount, newAuth);

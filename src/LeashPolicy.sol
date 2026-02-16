@@ -69,6 +69,7 @@ contract LeashPolicy {
     error LeashNotBound();
     error ActionNotAllowed();
     error BudgetExceeded();
+    error OnlyAgent();
 
     // ─── Constructor ────────────────────────────────────────────────────
 
@@ -92,8 +93,8 @@ contract LeashPolicy {
         bool[] calldata canDeploySubAgents,
         address[][] calldata whitelists
     ) external returns (bytes32 policyId) {
+        if (minAuthorities.length == 0 || minAuthorities.length > MAX_TIERS) revert InvalidTierCount();
         uint8 tierCount = uint8(minAuthorities.length);
-        if (tierCount == 0 || tierCount > MAX_TIERS) revert InvalidTierCount();
         if (epochDuration == 0) revert EpochDurationZero();
         if (
             spendCaps.length != tierCount || canDeploySubAgents.length != tierCount
@@ -197,6 +198,7 @@ contract LeashPolicy {
     }
 
     /// @notice Record spend against epoch budget after a validated action.
+    /// @dev Only callable by the leash's agent address.
     /// @param leashId The leash whose budget to debit
     /// @param amount Amount to debit
     function recordSpend(bytes32 leashId, uint128 amount) external {
@@ -204,6 +206,7 @@ contract LeashPolicy {
         if (policyId == bytes32(0)) revert LeashNotBound();
 
         LeashCore.Leash memory l = core.getLeash(leashId);
+        if (msg.sender != l.agent) revert OnlyAgent();
         if (!l.alive) revert LeashNotAlive();
 
         Policy storage p = _policies[policyId];
